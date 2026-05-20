@@ -19,6 +19,7 @@ find_package(spdlog REQUIRED)
 find_package(Threads REQUIRED)
 
 add_executable(sparse-solver-gym
+  src/benchmarks/laplacian_3d_streaming.cpp
   src/benchmarks/laplacian_1d.cpp
   src/sparse_solver_gym/benchmark.cpp
   src/sparse_solver_gym/cli.cpp

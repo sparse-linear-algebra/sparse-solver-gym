@@ -1,8 +1,11 @@
+#include "benchmarks/laplacian_common.hpp"
 #include "sparse_solver_gym/benchmark.hpp"
 #include "sparse_solver_gym/perfetto_trace.hpp"
 
-#include <algorithm>
-#include <cmath>
+#include <spdlog/spdlog.h>
+
+#include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <vector>
 
@@ -14,18 +17,7 @@ void run_laplacian_1d_fp64(ssg::benchmark_context& context) {
 
   TRACE_EVENT("ssg.benchmark", "laplacian_1d_fp64.setup", "n", n);
 
-  ssi::sparse_problem_properties_t properties;
-  properties.nrows = n;
-  properties.ncols = n;
-  properties.orientation = ssi::graph_orientation_t::row;
-  properties.itype = ssi::itype_t::i64;
-  properties.dtype = ssi::dtype_t::fp64;
-  properties.structurally_symmetric = ssi::property_state_t::known_true;
-  properties.numerically_symmetric = ssi::property_state_t::known_true;
-  properties.positive_definite = ssi::property_state_t::known_true;
-  properties.nonsingular = ssi::property_state_t::known_true;
-  properties.strong_hall = ssi::property_state_t::known_true;
-  properties.symmetric_storage = ssi::symmetric_storage_t::full;
+  auto properties = ssg::benchmarks::make_laplacian_properties(n);
 
   auto problem = context.solver->make_sparse_problem(properties);
   auto graph = problem->make_graph();
@@ -78,11 +70,21 @@ void run_laplacian_1d_fp64(ssg::benchmark_context& context) {
 
   auto rhs = context.solver->make_matrix(ssi::dtype_t::fp64);
   rhs->preallocate(n, 1);
+  std::vector<double> expected(static_cast<std::size_t>(n), 0.0);
+  std::vector<double> host_rhs(static_cast<std::size_t>(n), 0.0);
+  for (int64_t row = 0; row < n; ++row) {
+    expected[static_cast<std::size_t>(row)] = 1.0;
+  }
+  for (int64_t row = 0; row < n; ++row) {
+    host_rhs[static_cast<std::size_t>(row)] =
+        2.0 * expected[static_cast<std::size_t>(row)] -
+        (row > 0 ? expected[static_cast<std::size_t>(row - 1)] : 0.0) -
+        (row + 1 < n ? expected[static_cast<std::size_t>(row + 1)] : 0.0);
+  }
   std::function<void(ssi::matrix_view_t&)> rhs_builder =
-      [](ssi::matrix_view_t& view) {
+      [&](ssi::matrix_view_t& view) {
         for (int64_t row = view.rbeg; row < view.rend; ++row) {
-          const bool boundary = row == 0 || row + 1 == view.rend;
-          view.value_mut<double>(row, 0) = boundary ? 1.0 : 0.0;
+          view.value_mut<double>(row, 0) = host_rhs[static_cast<std::size_t>(row)];
         }
       };
   rhs->build_from_host(rhs_builder);
@@ -94,18 +96,29 @@ void run_laplacian_1d_fp64(ssg::benchmark_context& context) {
   auto numeric = symbolic->make_numeric_factorization(sparse_matrix);
   numeric->solve(*rhs, *solution);
 
-  double max_error = 0.0;
-  std::function<void(const ssi::matrix_view_t&)> solution_reader =
-      [&](const ssi::matrix_view_t& view) {
-        for (int64_t row = view.rbeg; row < view.rend; ++row) {
-          max_error = std::max(max_error, std::abs(view.value<double>(row, 0) - 1.0));
-        }
-      };
-  solution->read_to_host(solution_reader);
+  const auto metrics = ssg::benchmarks::validate_solution(
+      expected,
+      host_rhs,
+      *solution,
+      [n](int64_t row, const std::vector<double>& values) {
+        return 2.0 * values[static_cast<std::size_t>(row)] -
+               (row > 0 ? values[static_cast<std::size_t>(row - 1)] : 0.0) -
+               (row + 1 < n ? values[static_cast<std::size_t>(row + 1)] : 0.0);
+      });
 
-  TRACE_EVENT("ssg.benchmark", "laplacian_1d_fp64.verify", "max_error", max_error);
-  if (max_error > tolerance) {
-    throw std::runtime_error("laplacian_1d_fp64 residual check failed");
+  TRACE_EVENT(
+      "ssg.benchmark",
+      "laplacian_1d_fp64.verify",
+      "relative_error_inf",
+      metrics.relative_error_inf,
+      "relative_residual_inf",
+      metrics.relative_residual_inf);
+  spdlog::info(
+      "laplacian_1d_fp64 validation relative_error_inf={} relative_residual_inf={}",
+      metrics.relative_error_inf,
+      metrics.relative_residual_inf);
+  if (metrics.relative_error_inf > tolerance || metrics.relative_residual_inf > tolerance) {
+    throw std::runtime_error("laplacian_1d_fp64 validation failed");
   }
 }
 
