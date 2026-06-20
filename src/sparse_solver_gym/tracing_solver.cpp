@@ -65,6 +65,8 @@ class tracing_context_t final :
   std::shared_ptr<ssi::graph_t> make_graph(ssi::itype_t itype) override;
   std::shared_ptr<ssi::sparse_problem_t> make_sparse_problem(
       const ssi::sparse_problem_properties_t& properties) override;
+  ssi::support_result_t check_support(
+      const ssi::sparse_problem_properties_t& properties) const override;
 
   const trace_metadata& metadata() const { return metadata_; }
 
@@ -419,13 +421,13 @@ class tracing_numeric_factorization_t final : public ssi::numeric_factorization_
     return inner_->dtype();
   }
 
-  void solve(const ssi::matrix_t& rhs, ssi::matrix_t& solution) const override {
+  ssi::solve_result_t solve(const ssi::matrix_t& rhs, ssi::matrix_t& solution) const override {
     TRACE_EVENT("ssg.ssi.numeric", "numeric_factorization.solve", "benchmark", metadata_.benchmark_name);
     const auto* traced_rhs = dynamic_cast<const tracing_matrix_t*>(&rhs);
     auto* traced_solution = dynamic_cast<tracing_matrix_t*>(&solution);
     const ssi::matrix_t& inner_rhs = traced_rhs != nullptr ? traced_rhs->inner() : rhs;
     ssi::matrix_t& inner_solution = traced_solution != nullptr ? traced_solution->inner() : solution;
-    inner_->solve(inner_rhs, inner_solution);
+    return inner_->solve(inner_rhs, inner_solution);
   }
 
  private:
@@ -466,6 +468,19 @@ std::shared_ptr<ssi::sparse_problem_t> tracing_context_t::make_sparse_problem(
       inner_->make_sparse_problem(properties),
       metadata_,
       properties);
+}
+
+ssi::support_result_t tracing_context_t::check_support(
+    const ssi::sparse_problem_properties_t& properties) const {
+  TRACE_EVENT(
+      "ssg.ssi.context", "context.check_support",
+      "benchmark", metadata_.benchmark_name,
+      "nrows", properties.nrows,
+      "ncols", properties.ncols,
+      "orientation", orientation_name(properties.orientation),
+      "dtype", dtype_name(properties.dtype),
+      "itype", itype_name(properties.itype));
+  return inner_->check_support(properties);
 }
 
 std::shared_ptr<ssi::graph_t> tracing_sparse_problem_t::make_graph() {

@@ -5,6 +5,8 @@
 
 namespace ssg {
 
+inline constexpr int worker_unsupported_exit_code = 10;
+
 int run_worker(const cli_options& options);
 
 }  // namespace ssg

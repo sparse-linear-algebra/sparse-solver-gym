@@ -75,6 +75,9 @@ int run_worker(const cli_options& options) {
     trace.stop();
     spdlog::info("worker finished benchmark {}; trace {}", benchmark->name, options.trace_path);
     return 0;
+  } catch (const ssi::unsupported_error_t& error) {
+    spdlog::warn("worker unsupported: {}", error.what());
+    return worker_unsupported_exit_code;
   } catch (const std::exception& error) {
     spdlog::error("worker failed: {}", error.what());
     return 1;

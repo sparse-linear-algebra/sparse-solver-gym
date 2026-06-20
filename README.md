@@ -33,3 +33,8 @@ and the location is logged. Use `--output-dir DIR` for a run directory, or
 Each selected benchmark is run in a worker subprocess. The orchestrator records
 failed, crashed, and timed-out workers and continues running the remaining
 benchmarks. Tag filters currently use AND semantics.
+
+When a solver reports unsupported sparse problem properties through SSI
+`check_support`, the orchestrator marks that benchmark `unsupported` and skips
+the worker process. Unsupported benchmarks are reported in the log with the
+solver-provided reason, but do not make the overall run fail.

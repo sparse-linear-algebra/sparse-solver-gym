@@ -1,6 +1,9 @@
 #include "sparse_solver_gym/orchestrator.hpp"
 
 #include "sparse_solver_gym/benchmark.hpp"
+#include "sparse_solver_gym/worker.hpp"
+
+#include "sparse_solver_interface_plugin.hpp"
 
 #include <cerrno>
 #include <chrono>
@@ -24,6 +27,7 @@ namespace {
 
 enum class child_status {
   passed,
+  unsupported,
   failed,
   crashed,
   timed_out,
@@ -34,6 +38,7 @@ struct child_result {
   std::filesystem::path trace_path;
   child_status status = child_status::failed;
   int code = 0;
+  std::string reason;
 };
 
 std::string shell_safe_name(std::string_view value) {
@@ -129,7 +134,14 @@ child_result run_child(
   result.trace_path = trace_path;
   if (WIFEXITED(status)) {
     result.code = WEXITSTATUS(status);
-    result.status = result.code == 0 ? child_status::passed : child_status::failed;
+    if (result.code == 0) {
+      result.status = child_status::passed;
+    } else if (result.code == worker_unsupported_exit_code) {
+      result.status = child_status::unsupported;
+      result.reason = "worker reported unsupported benchmark requirements";
+    } else {
+      result.status = child_status::failed;
+    }
   } else if (WIFSIGNALED(status)) {
     result.code = WTERMSIG(status);
     result.status = child_status::crashed;
@@ -137,10 +149,66 @@ child_result run_child(
   return result;
 }
 
+const char* ssi_status_name(ssi::status_t status) {
+  switch (status) {
+    case ssi::status_t::ok:
+      return "ok";
+    case ssi::status_t::invalid_argument:
+      return "invalid_argument";
+    case ssi::status_t::out_of_range:
+      return "out_of_range";
+    case ssi::status_t::unsupported:
+      return "unsupported";
+    case ssi::status_t::singular:
+      return "singular";
+    case ssi::status_t::rank_deficient:
+      return "rank_deficient";
+    case ssi::status_t::indefinite:
+      return "indefinite";
+    case ssi::status_t::zero_pivot:
+      return "zero_pivot";
+    case ssi::status_t::breakdown:
+      return "breakdown";
+    case ssi::status_t::not_converged:
+      return "not_converged";
+    case ssi::status_t::exception:
+      return "exception";
+  }
+  return "unknown";
+}
+
+std::string support_reason(const ssi::support_result_t& support) {
+  std::string reason = std::string("status=") + ssi_status_name(support.status);
+  if (!support.reason.empty()) {
+    reason += " reason=" + support.reason;
+  }
+  return reason;
+}
+
+bool benchmark_supported(
+    const ssi::context_t& solver,
+    const benchmark_info& benchmark,
+    std::string& reason) {
+  if (!benchmark.support_requirements) {
+    return true;
+  }
+  const auto requirements = benchmark.support_requirements();
+  for (const auto& properties : requirements) {
+    const auto support = solver.check_support(properties);
+    if (!support.supported()) {
+      reason = support_reason(support);
+      return false;
+    }
+  }
+  return true;
+}
+
 const char* status_name(child_status status) {
   switch (status) {
     case child_status::passed:
       return "passed";
+    case child_status::unsupported:
+      return "unsupported";
     case child_status::failed:
       return "failed";
     case child_status::crashed:
@@ -199,33 +267,65 @@ int run_orchestrator(const cli_options& options) {
   std::filesystem::create_directories(output_dir);
   spdlog::info("writing benchmark traces to {}", output_dir.string());
 
+  auto support_context =
+      ssi::load_context_from_shared_object(options.solver_path.c_str());
+
   std::vector<child_result> results;
   for (const auto* benchmark : selected) {
+    std::string unsupported_reason;
+    if (!benchmark_supported(*support_context, *benchmark, unsupported_reason)) {
+      child_result result;
+      result.benchmark_name = benchmark->name;
+      result.status = child_status::unsupported;
+      result.reason = std::move(unsupported_reason);
+      spdlog::warn(
+          "benchmark {} unsupported: {}",
+          result.benchmark_name,
+          result.reason);
+      results.push_back(std::move(result));
+      continue;
+    }
+
     const auto trace_path = single_trace_path
                                 ? std::filesystem::path(options.trace_path)
                                 : output_dir / (shell_safe_name(benchmark->name) + ".pftrace");
     spdlog::info("running benchmark {}", benchmark->name);
     auto result = run_child(options, *benchmark, trace_path);
-    spdlog::info(
-        "benchmark {} {}; trace {}",
-        result.benchmark_name,
-        status_name(result.status),
-        result.trace_path.string());
+    if (result.status == child_status::unsupported) {
+      spdlog::warn(
+          "benchmark {} unsupported: {}",
+          result.benchmark_name,
+          result.reason);
+    } else {
+      spdlog::info(
+          "benchmark {} {}; trace {}",
+          result.benchmark_name,
+          status_name(result.status),
+          result.trace_path.string());
+    }
     results.push_back(std::move(result));
   }
 
-  bool all_passed = true;
+  bool all_supported_benchmarks_passed = true;
   for (const auto& result : results) {
-    if (result.status != child_status::passed) {
-      all_passed = false;
-      spdlog::error(
-          "benchmark {} ended as {} ({})",
-          result.benchmark_name,
-          status_name(result.status),
-          result.code);
+    if (result.status == child_status::passed) {
+      continue;
     }
+    if (result.status == child_status::unsupported) {
+      spdlog::warn(
+          "benchmark {} ended as unsupported ({})",
+          result.benchmark_name,
+          result.reason);
+      continue;
+    }
+    all_supported_benchmarks_passed = false;
+    spdlog::error(
+        "benchmark {} ended as {} ({})",
+        result.benchmark_name,
+        status_name(result.status),
+        result.code);
   }
-  return all_passed ? 0 : 1;
+  return all_supported_benchmarks_passed ? 0 : 1;
 }
 
 }  // namespace ssg
