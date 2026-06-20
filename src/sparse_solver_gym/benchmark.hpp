@@ -21,6 +21,7 @@ struct benchmark_info {
   std::string name;
   std::vector<std::string> tags;
   std::function<void(benchmark_context&)> run;
+  std::function<std::vector<ssi::sparse_problem_properties_t>()> support_requirements;
 };
 
 class benchmark_registry {

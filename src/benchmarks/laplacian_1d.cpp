@@ -11,8 +11,10 @@
 
 namespace {
 
+constexpr int64_t laplacian_1d_n = 16;
+
 void run_laplacian_1d_fp64(ssg::benchmark_context& context) {
-  constexpr int64_t n = 16;
+  constexpr int64_t n = laplacian_1d_n;
   constexpr double tolerance = 1.0e-8;
 
   TRACE_EVENT("ssg.benchmark", "laplacian_1d_fp64.setup", "n", n);
@@ -94,7 +96,8 @@ void run_laplacian_1d_fp64(ssg::benchmark_context& context) {
 
   auto symbolic = problem->make_symbolic_analysis();
   auto numeric = symbolic->make_numeric_factorization(sparse_matrix);
-  numeric->solve(*rhs, *solution);
+  ssg::benchmarks::require_successful_solve(
+      "laplacian_1d_fp64", numeric->solve(*rhs, *solution));
 
   const auto metrics = ssg::benchmarks::validate_solution(
       expected,
@@ -126,6 +129,10 @@ const ssg::benchmark_registration laplacian_1d_fp64_registration({
     "laplacian_1d_fp64",
     {"light", "correctness", "factorization", "fp64", "laplacian"},
     run_laplacian_1d_fp64,
+    [] {
+      return std::vector<ssi::sparse_problem_properties_t>{
+          ssg::benchmarks::make_laplacian_properties(laplacian_1d_n)};
+    },
 });
 
 }  // namespace

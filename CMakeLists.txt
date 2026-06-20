@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(SPARSE_SOLVER_INTERFACE_ROOT
-    "/home/reidatcheson/sparse_linear_algebra/installs/sparse_solver_interface/0.1.0"
+    "/home/reidatcheson/sparse_linear_algebra/installs/sparse_solver_interface"
     CACHE PATH "Path to the sparse solver interface install root")
 list(APPEND CMAKE_PREFIX_PATH
   "/home/reidatcheson/sparse_linear_algebra/installs/perfetto"

@@ -12,6 +12,8 @@
 
 namespace {
 
+constexpr int64_t streaming_rhs_count = 100;
+
 struct laplacian_3d {
   int64_t mx;
   int64_t my;
@@ -76,6 +78,8 @@ struct laplacian_3d {
   }
 };
 
+constexpr laplacian_3d streaming_laplacian{20, 20, 20};
+
 void build_laplacian_3d_graph(const laplacian_3d& laplacian, ssi::graph_t& graph) {
   std::function<void(ssi::graph_count_builder_t&)> count_builder =
       [&](ssi::graph_count_builder_t& builder) {
@@ -132,8 +136,8 @@ void manufacture_rhs(
 }
 
 void run_laplacian_3d_streaming_fp64(ssg::benchmark_context& context) {
-  constexpr laplacian_3d laplacian{20, 20, 20};
-  constexpr int64_t rhs_count = 100;
+  constexpr laplacian_3d laplacian = streaming_laplacian;
+  constexpr int64_t rhs_count = streaming_rhs_count;
   constexpr double tolerance = 1.0e-8;
   const int64_t n = laplacian.n();
 
@@ -181,7 +185,8 @@ void run_laplacian_3d_streaming_fp64(ssg::benchmark_context& context) {
 
     auto solution = context.solver->make_matrix(ssi::dtype_t::fp64);
     solution->preallocate(n, 1);
-    numeric->solve(*rhs, *solution);
+    ssg::benchmarks::require_successful_solve(
+        "laplacian_3d_streaming_fp64", numeric->solve(*rhs, *solution));
 
     const auto metrics = ssg::benchmarks::validate_solution(
         expected,
@@ -217,6 +222,10 @@ const ssg::benchmark_registration laplacian_3d_streaming_fp64_registration({
     "laplacian_3d_streaming_fp64",
     {"light", "streaming", "factorization", "fp64", "laplacian", "3d"},
     run_laplacian_3d_streaming_fp64,
+    [] {
+      return std::vector<ssi::sparse_problem_properties_t>{
+          ssg::benchmarks::make_laplacian_properties(streaming_laplacian.n())};
+    },
 });
 
 }  // namespace

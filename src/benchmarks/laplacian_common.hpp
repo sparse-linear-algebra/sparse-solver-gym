@@ -7,6 +7,9 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace ssg::benchmarks {
@@ -68,6 +71,61 @@ inline ssi::sparse_problem_properties_t make_laplacian_properties(int64_t n) {
   properties.strong_hall = ssi::property_state_t::known_true;
   properties.symmetric_storage = ssi::symmetric_storage_t::full;
   return properties;
+}
+
+inline const char* status_name(ssi::status_t status) {
+  switch (status) {
+    case ssi::status_t::ok:
+      return "ok";
+    case ssi::status_t::invalid_argument:
+      return "invalid_argument";
+    case ssi::status_t::out_of_range:
+      return "out_of_range";
+    case ssi::status_t::unsupported:
+      return "unsupported";
+    case ssi::status_t::singular:
+      return "singular";
+    case ssi::status_t::rank_deficient:
+      return "rank_deficient";
+    case ssi::status_t::indefinite:
+      return "indefinite";
+    case ssi::status_t::zero_pivot:
+      return "zero_pivot";
+    case ssi::status_t::breakdown:
+      return "breakdown";
+    case ssi::status_t::not_converged:
+      return "not_converged";
+    case ssi::status_t::exception:
+      return "exception";
+  }
+  return "unknown";
+}
+
+inline std::string solve_result_message(
+    std::string_view benchmark_name,
+    const ssi::solve_result_t& result) {
+  std::string message = std::string(benchmark_name) + " solve returned " +
+                        status_name(result.status);
+  if (!result.reason.empty()) {
+    message += ": " + result.reason;
+  }
+  return message;
+}
+
+inline void require_successful_solve(
+    std::string_view benchmark_name,
+    const ssi::solve_result_t& result) {
+  if (!result.success()) {
+    const auto message = solve_result_message(benchmark_name, result);
+    if (result.status == ssi::status_t::unsupported) {
+      throw ssi::unsupported_error_t(message);
+    }
+    throw ssi::numeric_error_t(result.status, message);
+  }
+  if (!result.converged) {
+    throw ssi::not_converged_error_t(
+        std::string(benchmark_name) + " solve did not converge");
+  }
 }
 
 }  // namespace ssg::benchmarks
